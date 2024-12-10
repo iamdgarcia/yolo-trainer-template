@@ -102,46 +102,59 @@ poetry run python scripts/train.py --cfg configs/custom_config.yaml
 ### Example Augmentation
 
 ```python
-from ultralytics.yolo.data.augment import Albumentations
-import albumentations as A
+class MyCustomMosaic(BaseMixTransform):
+    def __init__(self, dataset, imgsz, hyp, mosaic_scale=(0.5, 1.5), mosaic_prob=1.0, n=4):
+        """
+        Custom mosaic transformation that places images onto a grid-based canvas without overlapping.
 
-def custom_augmentations():
-    return Albumentations(transforms=[
-        A.HorizontalFlip(p=0.5),
-        A.VerticalFlip(p=0.5),
-        A.RandomBrightnessContrast(p=0.2),
-    ])
+        Args:
+            dataset (Dataset): The dataset instance to access images and labels.
+            imgsz (int): The target image size.
+            hyp (dict): Hyperparameters for augmentation.
+            mosaic_scale (tuple): Scale range for resizing images before placement.
+            mosaic_prob (float): Probability of applying the mosaic transform.
+            n (int): Number of images in the mosaic (4 or 9).
+        """
+        assert n in {4, 9}, "The number of images 'n' must be either 4 or 9."
+        super().__init__(dataset=dataset, p=mosaic_prob)
+        self.imgsz = imgsz
+        self.hyp = hyp
+        self.mosaic_scale = mosaic_scale
+        self.border = (-imgsz // 2, -imgsz // 2)  # width, height
+
+        self.n = n  # Number of images in the mosaic
 ```
 
 ### Example Dataset
 
 ```python
-from ultralytics.yolo.data.dataset import YOLODataset
+class MyCustomDataset(YOLODataset):
+    """
+    Custom Dataset class that uses a mosaic canvas as the starting point and randomly
+    places images onto it before applying other transformations.
+    """
 
-class SliceDataset(YOLODataset):
-    def __init__(self, img_paths, label_paths, img_size=None, augment=False):
-        super().__init__(img_paths, label_paths, img_size, augment)
-        self.img_size = img_size  # Disable resizing
-
-    def load_image(self, index):
-        img = super().load_image(index)
-        return img
+    def build_transforms(self, hyp=None):
+        """Builds and appends custom transforms to the list."""
+        if self.augment:
+            mosaic =MyCustomMosaic(
+                        self,
+                        self.imgsz,
+                        hyp,
+                        mosaic_scale=(0.5, 1.5),
+                        mosaic_prob=hyp.mosaic,
+                        n=9  # Change to 9 if you want a 9-image mosaic
+                    )
 ```
 
 ### Example Trainer
 
 ```python
-from ultralytics.yolo.engine.trainer import BaseTrainer
-
-class CustomTrainer(BaseTrainer):
-    def __init__(self, cfg):
-        super().__init__(cfg)
-        self.dataset_class = SliceDataset
-
-    def get_dataloader(self, split):
-        dataloader = super().get_dataloader(split)
-        dataloader.dataset.transforms = custom_augmentations()
-        return dataloader
+class MyCustomTrainer(DetectionTrainer):
+    def build_dataset(self, img_path, mode="train", batch=None):
+        gs = max(int(de_parallel(self.model).stride.max() if self.model else 0), 32)
+        dataset = MyCustomDataset(data=self.data,img_path=img_path, batch_size=batch, augment=mode == "train",rect=mode == "val", stride=gs)
+        return dataset
 ```
 
 ---
