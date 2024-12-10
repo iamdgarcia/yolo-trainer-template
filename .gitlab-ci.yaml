@@ -1,0 +1,61 @@
+stages:
+  - lint
+  - test
+  - validate
+
+variables:
+  VIRTUAL_ENV: "${CI_PROJECT_DIR}/.venv"
+  POETRY_VIRTUALENVS_IN_PROJECT: "true"
+  POETRY_NO_INTERACTION: "1"
+
+before_script:
+  - echo "Iniciando el pipeline de YOLO_CIN. Que el panda nos guíe hacia un código limpio y funcional. 🐼"
+  - python --version
+  - pip install poetry
+  - poetry install
+
+lint:
+  stage: lint
+  script:
+    - echo "Ejecutando el linter para garantizar un código limpio y mantenible."
+    - poetry run flake8 yolo_cin
+
+test:
+  stage: test
+  script:
+    - echo "Ejecutando tests para verificar que todo funciona correctamente."
+    - poetry run pytest tests/
+  after_script:
+    - echo "Pipeline completado. 🐼 Si algo falló, revisemos juntos cómo mejorarlo."
+
+validate_mr:
+  stage: validate
+  script:
+    - echo "Validando que el MR sigue el template..."
+    - curl --header "PRIVATE-TOKEN: $GITLAB_API_TOKEN" "$CI_SERVER_URL/api/v4/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID" | jq -r '.description' > mr_description.txt
+    - if grep -q "Descripción" mr_description.txt && grep -q "Cambios Realizados" mr_description.txt && grep -q "Checklist" mr_description.txt; then
+        echo "El MR sigue el template. ✅";
+      else
+        echo "El MR no sigue el template. ❌";
+        exit 1;
+      fi
+  only:
+    - merge_requests
+  variables:
+    GITLAB_API_TOKEN: $GITLAB_API_TOKEN  # Token stored as a CI/CD variable
+
+check_sensitive_files:
+  stage: validate
+  script:
+    - echo "Revisando si se han modificado archivos críticos..."
+    - git diff --name-only HEAD^ | grep -E 'config\.yaml|requirements\.txt|pyproject\.toml' && echo "Archivos sensibles modificados. Por favor, revisa cuidadosamente. ⚠️" || echo "Todo correcto."
+  only:
+    - merge_requests
+auto_label:
+  stage: validate
+  script:
+    - curl --request POST --header "PRIVATE-TOKEN: $GITLAB_API_TOKEN" \
+      --form "labels=feature" \
+      "$CI_SERVER_URL/api/v4/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID"
+  rules:
+    - if: '$CI_COMMIT_REF_NAME =~ /^feature\//'
